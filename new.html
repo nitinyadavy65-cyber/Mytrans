@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mytrans Diary</title>
+
+  <!-- Tailwind for styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Firebase SDKs (Auth, Firestore) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- XLSX for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(135deg,#f8fafc,#eef2ff); min-height:100vh; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:100; }
+  </style>
+</head>
+<body class="p-6">
+
+  <!-- Top notice for developer: replace firebase config below with your project's config -->
+  <!-- IMPORTANT: After deploying, configure Firestore rules to secure user data. Example rules included in comments at bottom. -->
+
+  <div id="app" class="max-w-6xl mx-auto">
+    <div id="authView" class="min-h-screen flex items-center justify-center">
+      <div class="bg-white rounded-2xl shadow-lg p-6 w-full max-w-md">
+        <h2 class="text-2xl font-bold text-slate-800 mb-2">Mytrans Diary</h2>
+        <p class="text-sm text-slate-500 mb-4">Secure cloud diary for daily transactions</p>
+
+        <div id="authForms">
+          <div id="loginForm">
+            <input id="email" placeholder="Email" class="w-full border rounded p-2 mb-2" type="email" />
+            <input id="password" placeholder="Password" type="password" class="w-full border rounded p-2 mb-3" />
+            <div class="flex gap-2 mb-3">
+              <button id="loginBtn" class="flex-1 bg-indigo-600 text-white py-2 rounded">Login</button>
+              <button id="showSignup" class="flex-1 bg-green-600 text-white py-2 rounded">Sign up</button>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+              <button id="forgotPwd" class="text-indigo-600">Forgot password?</button>
+              <button id="demoGuest" class="text-sm bg-gray-100 px-3 py-1 rounded">Try Demo</button>
+            </div>
+            <p id="authMsg" class="text-sm mt-3"></p>
+          </div>
+
+          <div id="signupForm" class="hidden">
+            <input id="signupEmail" placeholder="Email" class="w-full border rounded p-2 mb-2" type="email" />
+            <input id="signupPassword" placeholder="Password (min 6 chars)" type="password" class="w-full border rounded p-2 mb-3" />
+            <div class="flex gap-2 mb-3">
+              <button id="signupBtn" class="flex-1 bg-green-600 text-white py-2 rounded">Create account</button>
+              <button id="backToLogin" class="flex-1 bg-gray-200 py-2 rounded">Back</button>
+            </div>
+            <p id="signupMsg" class="text-sm mt-1"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main app (hidden until login) -->
+    <div id="mainApp" class="hidden bg-white rounded-2xl shadow-xl p-6">
+      <header class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-4">
+          <div class="h-12 w-12 rounded-md bg-gradient-to-br from-indigo-500 to-emerald-400 flex items-center justify-center text-white font-bold">MT</div>
+          <div>
+            <h1 class="text-2xl font-bold">MyTrans Diary</h1>
+            <div id="userEmailDisplay" class="text-sm text-slate-500">Your transactions — cloud saved</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="exportExcel" class="bg-amber-500 text-white px-3 py-2 rounded text-sm">Export Excel</button>
+          <button id="logoutBtn" class="bg-red-500 text-white px-3 py-2 rounded text-sm">Logout</button>
+        </div>
+      </header>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Stats -->
+        <div>
+          <div class="p-4 bg-white rounded-lg shadow mb-4 text-center">
+            <div class="text-sm text-slate-500">Total Transactions</div>
+            <div id="statCount" class="text-2xl font-bold text-blue-600">0</div>
+          </div>
+          <div class="p-4 bg-white rounded-lg shadow mb-4 text-center">
+            <div class="text-sm text-slate-500">Total Amount</div>
+            <div id="statAmt" class="text-2xl font-bold text-green-600">₹0</div>
+          </div>
+          <div class="p-4 bg-white rounded-lg shadow text-center">
+            <div class="text-sm text-slate-500">Total Profit</div>
+            <div id="statProf" class="text-2xl font-bold text-indigo-600">₹0</div>
+          </div>
+        </div>
+
+        <!-- Add, search, table, charts -->
+        <div class="lg:col-span-2">
+          <section class="bg-slate-50 p-4 rounded-lg shadow mb-6">
+            <h3 class="font-semibold mb-3">Add Transaction</h3>
+            <div class="grid md:grid-cols-3 gap-3">
+              <div>
+                <label class="text-xs text-slate-600">Service</label>
+                <select id="service" class="w-full border rounded p-2"></select>
+              </div>
+              <div>
+                <label class="text-xs text-slate-600">Amount (₹)</label>
+                <input id="amount" class="w-full border rounded p-2" placeholder="0" inputmode="numeric" />
+              </div>
+              <div>
+                <label class="text-xs text-slate-600">Profit (₹)</label>
+                <input id="profit" class="w-full border rounded p-2" placeholder="0" inputmode="numeric" />
+              </div>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-3 mt-3">
+              <input id="customerName" class="border rounded p-2" placeholder="Customer name (optional)" />
+              <input id="customerMobile" class="border rounded p-2" placeholder="Customer mobile (10 digits)" inputmode="numeric" />
+            </div>
+
+            <div class="flex flex-wrap gap-2 mt-3">
+              <button id="saveTrans" class="bg-green-600 text-white px-4 py-2 rounded">Save Transaction</button>
+              <button id="clearFilters" class="bg-gray-200 px-4 py-2 rounded">Clear filters</button>
+            </div>
+            <p id="transErr" class="text-red-500 text-sm mt-2"></p>
+          </section>
+
+          <div class="bg-white p-4 rounded-lg shadow mb-6">
+            <h4 class="font-semibold mb-2">Search Transactions</h4>
+            <div class="flex flex-wrap gap-3 items-center">
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-slate-600">Date</label>
+                <input type="date" id="searchDate" class="border p-2 rounded" />
+                <button id="searchBtn" class="bg-blue-600 text-white px-3 py-2 rounded">Search</button>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-slate-600">From</label>
+                <input type="date" id="fromDate" class="border p-2 rounded" />
+                <label class="text-sm text-slate-600">To</label>
+                <input type="date" id="toDate" class="border p-2 rounded" />
+                <button id="rangeBtn" class="bg-blue-600 text-white px-3 py-2 rounded">Search Range</button>
+              </div>
+
+              <div class="ml-auto">
+                <button id="showAllBtn" class="bg-gray-200 px-3 py-2 rounded">Show All</button>
+              </div>
+            </div>
+          </div>
+
+          <section class="bg-white p-4 rounded-lg shadow">
+            <h4 class="font-semibold mb-3">Transactions</h4>
+            <div class="overflow-auto max-h-[440px]">
+              <table class="w-full text-sm table-auto" id="transTable">
+                <thead class="bg-slate-100 sticky top-0">
+                  <tr>
+                    <th class="p-2 border">Service</th>
+                    <th class="p-2 border">Amount (₹)</th>
+                    <th class="p-2 border">Profit (₹)</th>
+                    <th class="p-2 border">Customer</th>
+                    <th class="p-2 border">Mobile</th>
+                    <th class="p-2 border">Date</th>
+                    <th class="p-2 border">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="transBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="grid md:grid-cols-2 gap-4 mt-6">
+            <div class="bg-white p-4 rounded shadow">
+              <h5 class="font-semibold mb-2">Service Distribution (Amount)</h5>
+              <canvas id="pieChart" height="160"></canvas>
+            </div>
+            <div class="bg-white p-4 rounded shadow">
+              <h5 class="font-semibold mb-2">Amount by Date (Last 14 days)</h5>
+              <canvas id="barChart" height="160"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete / Edit modal -->
+    <div id="modal" class="hidden">
+      <div class="modal-backdrop">
+        <div class="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
+          <h3 id="modalTitle" class="text-xl font-bold mb-2">Edit Transaction</h3>
+          <div class="space-y-2">
+            <input id="modalService" class="w-full border rounded p-2" />
+            <input id="modalAmount" class="w-full border rounded p-2" />
+            <input id="modalProfit" class="w-full border rounded p-2" />
+            <input id="modalCustomer" class="w-full border rounded p-2" />
+            <input id="modalMobile" class="w-full border rounded p-2" />
+          </div>
+          <div class="flex justify-end gap-2 mt-4">
+            <button id="modalCancel" class="px-3 py-2 rounded bg-gray-200">Cancel</button>
+            <button id="modalDelete" class="px-3 py-2 rounded bg-red-500 text-white">Delete</button>
+            <button id="modalSave" class="px-3 py-2 rounded bg-green-600 text-white">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+/* -------------------------------------------------------------
+   MyTrans Diary — single-file frontend using Firebase (Firestore)
+   - Auth: Email/password
+   - Storage: Firestore under collection: users/{uid}/transactions
+   - Export: XLSX
+   - Charts: Chart.js
+
+   How to use:
+   1. Create a Firebase project at https://console.firebase.google.com
+   2. Enable Email/Password sign-in in Authentication
+   3. Create a Firestore database (mode: test for dev; configure rules before production)
+   4. Replace the firebaseConfig placeholder below with your project's config
+   5. Deploy the site (Vercel / Netlify / Firebase Hosting)
+
+   NOTE: You must add secure Firestore rules so users can only access their own documents.
+   Example rules (copy to Firebase console > Rules):
+
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /users/{userId}/transactions/{transId} {
+         allow read, write: if request.auth != null && request.auth.uid == userId;
+       }
+     }
+   }
+
+   -------------------------------------------------------------*/
+
+// ------------------- Firebase config (REPLACE) -------------------
+const firebaseConfig = {
+  apiKey: "AIzaSyC93_tjQQ5tikjtBS3MezBD_PZLE3HLoco",
+  authDomain: "aarnit-fc1b2.firebaseapp.com",
+  projectId: "aarnit-fc1b2",
+  storageBucket: "aarnit-fc1b2.firebasestorage.app",
+  messagingSenderId: "1090963251719",
+  appId: "1:1090963251719:web:5c03084f735f93f23b80a2",
+  measurementId: "G-GL7M1892E8"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+// ------------------- App constants -------------------
+const SERVICES = [
+  "Money Transfer (UPI)",
+  "Money Transfer (Account)",
+  "AEPS Withdrawal",
+  "Open Bank Account (SBI)",
+  "Open Bank Account (PNB)",
+  "Mobile Accessories",
+  "Print / Photocopy",
+  "Passport Size Photo",
+  "PAN Application",
+  "PVC / Lamination",
+  "Aadhaar Services",
+  "Voter ID Services"
+];
+
+// ------------------- UI elements -------------------
+const authView = document.getElementById('authView');
+const authMsg = document.getElementById('authMsg');
+const signupMsg = document.getElementById('signupMsg');
+const loginForm = document.getElementById('loginForm');
+const signupForm = document.getElementById('signupForm');
+const mainApp = document.getElementById('mainApp');
+const userEmailDisplay = document.getElementById('userEmailDisplay');
+
+const emailInput = document.getElementById('email');
+const pwdInput = document.getElementById('password');
+const loginBtn = document.getElementById('loginBtn');
+const showSignup = document.getElementById('showSignup');
+const backToLogin = document.getElementById('backToLogin');
+const signupBtn = document.getElementById('signupBtn');
+const signupEmail = document.getElementById('signupEmail');
+const signupPassword = document.getElementById('signupPassword');
+const forgotPwd = document.getElementById('forgotPwd');
+const demoGuest = document.getElementById('demoGuest');
+
+const logoutBtn = document.getElementById('logoutBtn');
+const exportExcelBtn = document.getElementById('exportExcel');
+
+const serviceSelect = document.getElementById('service');
+const amountInput = document.getElementById('amount');
+const profitInput = document.getElementById('profit');
+const customerName = document.getElementById('customerName');
+const customerMobile = document.getElementById('customerMobile');
+const saveTrans = document.getElementById('saveTrans');
+const transErr = document.getElementById('transErr');
+
+const searchDate = document.getElementById('searchDate');
+const searchBtn = document.getElementById('searchBtn');
+const fromDate = document.getElementById('fromDate');
+const toDate = document.getElementById('toDate');
+const rangeBtn = document.getElementById('rangeBtn');
+const showAllBtn = document.getElementById('showAllBtn');
+const clearFilters = document.getElementById('clearFilters');
+
+const transBody = document.getElementById('transBody');
+const statCount = document.getElementById('statCount');
+const statAmt = document.getElementById('statAmt');
+const statProf = document.getElementById('statProf');
+
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalService = document.getElementById('modalService');
+const modalAmount = document.getElementById('modalAmount');
+const modalProfit = document.getElementById('modalProfit');
+const modalCustomer = document.getElementById('modalCustomer');
+const modalMobile = document.getElementById('modalMobile');
+const modalCancel = document.getElementById('modalCancel');
+const modalDelete = document.getElementById('modalDelete');
+const modalSave = document.getElementById('modalSave');
+
+let pieChart = null; let barChart = null;
+let currentUser = null;
+let currentEditId = null; // transaction id being edited
+
+// ------------------- Helpers -------------------
+function q(sel) { return document.querySelector(sel); }
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
+function formatINR(n){ return '₹' + Number(n || 0).toLocaleString(); }
+
+function escapeHtml(s){ if(s===null||s===undefined) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+// ------------------- Render services dropdown -------------------
+function renderServices(){ serviceSelect.innerHTML = ''; SERVICES.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; serviceSelect.appendChild(o); }); }
+
+// ------------------- Authentication -------------------
+showSignup.addEventListener('click', ()=>{ hide(loginForm); show(signupForm); });
+backToLogin.addEventListener('click', ()=>{ show(loginForm); hide(signupForm); });
+
+signupBtn.addEventListener('click', async ()=>{
+  const email = signupEmail.value.trim();
+  const pwd = signupPassword.value.trim();
+  if(!email || !pwd){ signupMsg.textContent = 'Please fill all fields'; return; }
+  try{
+    const userCred = await auth.createUserWithEmailAndPassword(email, pwd);
+    signupMsg.style.color = 'green'; signupMsg.textContent = 'Account created — logged in';
+    signupEmail.value = ''; signupPassword.value = '';
+  }catch(err){ signupMsg.style.color='red'; signupMsg.textContent = err.message; }
+});
+
+loginBtn.addEventListener('click', async ()=>{
+  const email = emailInput.value.trim();
+  const pwd = pwdInput.value.trim();
+  if(!email || !pwd){ authMsg.textContent = 'Enter both email and password'; return; }
+  try{
+    await auth.signInWithEmailAndPassword(email, pwd);
+    authMsg.textContent = '';
+  }catch(err){ authMsg.style.color='red'; authMsg.textContent = err.message; }
+});
+
+forgotPwd.addEventListener('click', async ()=>{
+  const email = prompt('Enter your account email for password reset:');
+  if(!email) return; try{ await auth.sendPasswordResetEmail(email); alert('Password reset email sent'); }catch(err){ alert(err.message); }
+});
+
+demoGuest.addEventListener('click', async ()=>{
+  // create a temporary demo user with random email (persisted in firebase) - for quick demo only
+  try{
+    const demoEmail = `demo+${Date.now()}@mytrans.local`;
+    const demoPwd = 'demopass123';
+    await auth.createUserWithEmailAndPassword(demoEmail, demoPwd);
+    alert('Demo account created — you are logged in. Use the Logout button to exit.');
+  }catch(err){ alert('Demo error: '+err.message); }
+});
+
+logoutBtn.addEventListener('click', async ()=>{ await auth.signOut(); location.reload(); });
+
+// ------------------- Firestore helpers -------------------
+function userTransCollection(uid){ return db.collection('users').doc(uid).collection('transactions'); }
+
+async function addTransactionToFirestore(uid, tx){
+  const col = userTransCollection(uid);
+  const doc = await col.add(tx);
+  return doc.id;
+}
+
+async function updateTransactionInFirestore(uid, id, patch){
+  const docRef = userTransCollection(uid).doc(id);
+  await docRef.update(patch);
+}
+
+async function deleteTransactionInFirestore(uid, id){
+  const docRef = userTransCollection(uid).doc(id);
+  await docRef.delete();
+}
+
+async function fetchAllTransactions(uid){
+  const snap = await userTransCollection(uid).orderBy('date','desc').get();
+  return snap.docs.map(d=>({ id: d.id, ...d.data() }));
+}
+
+async function fetchTransactionsByDate(uid, dateISO){
+  const start = dateISO + 'T00:00:00.000Z';
+  const end = dateISO + 'T23:59:59.999Z';
+  const snap = await userTransCollection(uid).where('date','>=', start).where('date','<=', end).orderBy('date','desc').get();
+  return snap.docs.map(d=>({ id: d.id, ...d.data() }));
+}
+
+async function fetchTransactionsInRange(uid, fromISO, toISO){
+  const start = fromISO + 'T00:00:00.000Z';
+  const end = toISO + 'T23:59:59.999Z';
+  const snap = await userTransCollection(uid).where('date','>=', start).where('date','<=', end).orderBy('date','desc').get();
+  return snap.docs.map(d=>({ id: d.id, ...d.data() }));
+}
+
+// ------------------- UI render helpers -------------------
+function renderTransactionsList(list){
+  if(!list || list.length === 0){ transBody.innerHTML = `<tr><td colspan="7" class="p-3 text-center">No transactions</td></tr>`; return; }
+  const rows = list.map(t=>{
+    const dateStr = (new Date(t.date)).toLocaleString();
+    return `<tr>
+      <td class="p-2 border">${escapeHtml(t.service)}</td>
+      <td class="p-2 border">${Number(t.amount).toLocaleString()}</td>
+      <td class="p-2 border">${Number(t.profit).toLocaleString()}</td>
+      <td class="p-2 border">${escapeHtml(t.customerName || '-')}</td>
+      <td class="p-2 border">${escapeHtml(t.customerMobile || '-')}</td>
+      <td class="p-2 border">${dateStr}</td>
+      <td class="p-2 border"><button data-id="${t.id}" class="editBtn text-xs text-indigo-600 mr-2">Edit</button><button data-id="${t.id}" class="delBtn text-xs text-red-600">Delete</button></td>
+    </tr>`;
+  }).join('');
+  transBody.innerHTML = rows;
+
+  // attach events
+  document.querySelectorAll('.delBtn').forEach(b=> b.addEventListener('click', onDeleteClick));
+  document.querySelectorAll('.editBtn').forEach(b=> b.addEventListener('click', onEditClick));
+}
+
+function renderStats(list){
+  const data = list || [];
+  const totalAmt = data.reduce((a,b)=> a + Number(b.amount || 0), 0);
+  const totalProf = data.reduce((a,b)=> a + Number(b.profit || 0), 0);
+  statCount.textContent = data.length;
+  statAmt.textContent = formatINR(totalAmt);
+  statProf.textContent = formatINR(totalProf);
+}
+
+// ------------------- Charts -------------------
+function renderCharts(list){
+  const data = list || [];
+  const amountsByService = SERVICES.map(s => data.filter(t=>t.service===s).reduce((a,b)=> a + Number(b.amount || 0), 0));
+  const labels = SERVICES.filter((s,i)=> amountsByService[i] > 0);
+  const values = amountsByService.filter(v=> v > 0);
+
+  const pieCtx = document.getElementById('pieChart').getContext('2d');
+  if(pieChart) pieChart.destroy();
+  pieChart = new Chart(pieCtx, { type:'pie', data:{ labels, datasets:[{ data: values }] }, options:{ responsive:true, plugins:{ legend:{ position:'bottom' } } } });
+
+  // Last 14 days amounts
+  const days = [];
+  const amounts = [];
+  for(let i=13;i>=0;i--){ const d = new Date(); d.setDate(d.getDate()-i); const key = d.toISOString().slice(0,10); days.push(key); const sum = data.filter(t=> t.date.slice(0,10) === key).reduce((a,b)=> a + Number(b.amount || 0),0); amounts.push(sum); }
+  const barCtx = document.getElementById('barChart').getContext('2d');
+  if(barChart) barChart.destroy();
+  barChart = new Chart(barCtx, { type:'bar', data:{ labels: days, datasets:[{ label: 'Amount (₹)', data: amounts }] }, options:{ responsive:true, scales:{ x:{ ticks:{ maxRotation:45, minRotation:0 } } } } });
+}
+
+// ------------------- Actions -------------------
+async function onSaveTransaction(){
+  transErr.textContent = '';
+  const svc = serviceSelect.value;
+  const amt = parseFloat(amountInput.value) || 0;
+  const prof = parseFloat(profitInput.value) || 0;
+  const cust = customerName.value.trim();
+  const mob = customerMobile.value.trim();
+
+  if(svc === 'Money Transfer (UPI)'){
+    if(!cust){ transErr.textContent = 'Customer name is required for UPI transfers'; return; }
+    if(!/^\d{10}$/.test(mob)){ transErr.textContent = 'Valid 10-digit mobile is required for UPI transfers'; return; }
+  }
+
+  const tx = {
+    service: svc,
+    amount: amt,
+    profit: prof,
+    customerName: cust || '',
+    customerMobile: mob || '',
+    date: new Date().toISOString()
+  };
+
+  try{
+    await addTransactionToFirestore(currentUser.uid, tx);
+    amountInput.value=''; profitInput.value=''; customerName.value=''; customerMobile.value='';
+    await loadAndRenderAll();
+  }catch(err){ transErr.textContent = err.message; }
+}
+
+async function onDeleteClick(e){
+  const id = e.currentTarget.dataset.id;
+  if(!confirm('Delete this transaction?')) return;
+  try{ await deleteTransactionInFirestore(currentUser.uid, id); await loadAndRenderAll(); }catch(err){ alert(err.message); }
+}
+
+async function onEditClick(e){
+  const id = e.currentTarget.dataset.id;
+  currentEditId = id;
+  // fetch doc
+  const doc = await userTransCollection(currentUser.uid).doc(id).get();
+  if(!doc.exists){ alert('Not found'); return; }
+  const d = doc.data();
+  modalService.value = d.service; modalAmount.value = d.amount; modalProfit.value = d.profit; modalCustomer.value = d.customerName; modalMobile.value = d.customerMobile;
+  modalTitle.textContent = 'Edit Transaction';
+  show(modal);
+}
+
+modalCancel.addEventListener('click', ()=>{ hide(modal); });
+modalDelete.addEventListener('click', async ()=>{
+  if(!currentEditId) return; if(!confirm('Delete this transaction?')) return;
+  try{ await deleteTransactionInFirestore(currentUser.uid, currentEditId); currentEditId=null; hide(modal); await loadAndRenderAll(); }catch(err){ alert(err.message); }
+});
+modalSave.addEventListener('click', async ()=>{
+  if(!currentEditId) return; const patch = { service: modalService.value, amount: parseFloat(modalAmount.value)||0, profit: parseFloat(modalProfit.value)||0, customerName: modalCustomer.value.trim()||'', customerMobile: modalMobile.value.trim()||'' };
+  try{ await updateTransactionInFirestore(currentUser.uid, currentEditId, patch); currentEditId=null; hide(modal); await loadAndRenderAll(); }catch(err){ alert(err.message); }
+});
+
+// ------------------- Load & render -------------------
+let cachedList = [];
+async function loadAndRenderAll(){
+  if(!currentUser) return; const list = await fetchAllTransactions(currentUser.uid); cachedList = list; renderTransactionsList(list); renderCharts(list); renderStats(list);
+}
+
+// ------------------- Search handlers -------------------
+searchBtn.addEventListener('click', async ()=>{
+  const date = searchDate.value; if(!date){ alert('Pick a date'); return; }
+  const list = await fetchTransactionsByDate(currentUser.uid, date); cachedList = list; renderTransactionsList(list); renderCharts(list); renderStats(list);
+});
+rangeBtn.addEventListener('click', async ()=>{
+  const f = fromDate.value; const t = toDate.value; if(!f||!t){ alert('Select both from and to'); return; } if(f>t){ alert('From must be <= To'); return; }
+  const list = await fetchTransactionsInRange(currentUser.uid, f, t); cachedList = list; renderTransactionsList(list); renderCharts(list); renderStats(list);
+});
+showAllBtn.addEventListener('click', async ()=>{ await loadAndRenderAll(); searchDate.value=''; fromDate.value=''; toDate.value=''; });
+clearFilters.addEventListener('click', ()=>{ searchDate.value=''; fromDate.value=''; toDate.value=''; loadAndRenderAll(); });
+
+// ------------------- Export to Excel -------------------
+exportExcelBtn.addEventListener('click', ()=>{
+  if(!cachedList || cachedList.length===0){ alert('No data to export'); return; }
+  const sheet = cachedList.map(t=>({ Service: t.service, Amount: t.amount, Profit: t.profit, Customer: t.customerName, Mobile: t.customerMobile, Date: t.date }));
+  const ws = XLSX.utils.json_to_sheet(sheet);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Transactions'); XLSX.writeFile(wb, 'transactions.xlsx');
+});
+
+// ------------------- Auth state observer -------------------
+auth.onAuthStateChanged(async (user)=>{
+  if(user){
+    currentUser = user; hide(authView); show(mainApp); userEmailDisplay.textContent = user.email; renderServices(); await loadAndRenderAll();
+  }else{
+    currentUser=null; show(authView); hide(mainApp);
+  }
+});
+
+// ------------------- Init UI defaults -------------------
+(function init(){
+  renderServices();
+  // autofill today for search
+  const today = new Date().toISOString().slice(0,10); if(searchDate) searchDate.value = today;
+})();
+
+// ------------------- Wire buttons -------------------
+saveTrans.addEventListener('click', onSaveTransaction);
+
+</script>
+
+</body>
+</html>
